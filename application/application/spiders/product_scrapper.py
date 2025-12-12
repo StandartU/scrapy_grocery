@@ -1,11 +1,16 @@
 import scrapy
 import re
 import json
+from fake_useragent import UserAgent
 
 class ProductSpider(scrapy.Spider):
     name = "product_scrapper"
     allowed_domains = ["yarcheplus.ru"]
     start_urls = ["https://yarcheplus.ru/"]
+    
+    custom_settings = {
+        "User-Agent": UserAgent().firefox
+    }
 
     def parse(self, response, **kwargs):
         token = response.css('script::text').re_first(r'token\s*:\s*"([a-f0-9\-]+)"')
@@ -24,7 +29,7 @@ class ProductSpider(scrapy.Spider):
 
             yield response.follow(
                 url,
-                callback=self.parse_item,
+                callback=None,
                 cb_kwargs={"product_id": product_id}
             )
 

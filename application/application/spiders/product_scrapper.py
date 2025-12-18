@@ -2,6 +2,9 @@ import scrapy
 import re
 import json
 from fake_useragent import UserAgent
+from ql import input as i
+from ql import query as q
+
 
 class ProductSpider(scrapy.Spider):
     name = "product_scrapper"
@@ -14,23 +17,32 @@ class ProductSpider(scrapy.Spider):
 
     def parse(self, response, **kwargs):
         token = response.css('script::text').re_first(r'token\s*:\s*"([a-f0-9\-]+)"')
-        self.token = token
 
         categories = response.css('a.aJjLH4KAr::attr(href)').getall()
 
-        for url in categories:
-            yield response.follow(url, callback=self.parse_category)
+        for category_url in categories:
+            yield response.follow(
+                category_url,
+                callback=self.parse_category,
+                cb_kwargs={"category_url": category_url},
+                meta={"token": token}
+            )
 
-    def parse_category(self, response):
-        product_links = response.css('.aUuHgqUxc a::attr(href)').getall()
+    def parse_category(self, response, category_url):
+        product_urls = response.css('.aUuHgqUxc a::attr(href)').getall()
 
-        for url in product_links:
-            product_id = extract_id(url)
+        for product_url in product_urls:
+            product_id = extract_id(product_url)
 
             yield response.follow(
-                url,
-                callback=None,
-                cb_kwargs={"product_id": product_id}
+                product_url,
+                callback=self.parse_item,
+                cb_kwargs={
+                    "product_id": product_id,
+                    "product_url": product_url,
+                    "category_url": category_url
+                },
+                meta={**response.meta}
             )
 
         pagination_container = response.xpath('//div[contains(@class, "aft")]')
@@ -39,14 +51,17 @@ class ProductSpider(scrapy.Spider):
             pages = pagination_container.xpath('.//a/@href').getall()
 
             for page in pages:
-                yield response.follow(page, callback=self.parse_category)
+                yield response.follow(
+                    page,
+                    callback=self.parse_category,
+                    cb_kwargs={"category_url": category_url},
+                    meta={**response.meta}
+                )
 
-    # TODO ql запрос для получения всех данных по продукту
-    def parse_item(self, response, product_id):
+    def parse_item(self, response, product_id, product_url, category_url):
         query = {
-            "query": "...GraphQL-запрос...",
-            "variables": {"id": product_id, "similarProductsInput": {"filter": {"similarByProductId": product_id},
-                                                                     "page": {"page": 1, "limit": 6}}}
+            "query": q.product,
+            "variables": i.product.format(product_id=product_id)
         }
 
         yield scrapy.Request(
@@ -54,10 +69,9 @@ class ProductSpider(scrapy.Spider):
             method="POST",
             headers={
                 "Content-Type": "application/json",
-                "token": self.token,
+                "token": response.meta["token"],
                 "Origin": "https://yarcheplus.ru",
-                "Referer": "https://yarcheplus.ru",
-                "User-Agent": "Mozilla/5.0 ..."
+                "Referer": "https://yarcheplus.ru"
             },
             body=json.dumps(query),
             callback=self.save_product_data

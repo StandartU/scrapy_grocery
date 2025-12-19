@@ -1,9 +1,11 @@
 import scrapy
 import re
 import json
+from datetime import datetime
 from fake_useragent import UserAgent
-from ql import input as i
-from ql import query as q
+
+from ..items import ProductItem
+from ..ql import payload as p
 
 
 class ProductSpider(scrapy.Spider):
@@ -16,16 +18,13 @@ class ProductSpider(scrapy.Spider):
     }
 
     def parse(self, response, **kwargs):
-        token = response.css('script::text').re_first(r'token\s*:\s*"([a-f0-9\-]+)"')
-
         categories = response.css('a.aJjLH4KAr::attr(href)').getall()
 
         for category_url in categories:
             yield response.follow(
                 category_url,
                 callback=self.parse_category,
-                cb_kwargs={"category_url": category_url},
-                meta={"token": token}
+                cb_kwargs={"category_url": category_url}
             )
 
     def parse_category(self, response, category_url):
@@ -36,13 +35,12 @@ class ProductSpider(scrapy.Spider):
 
             yield response.follow(
                 product_url,
-                callback=self.parse_item,
+                callback=self.parse_product,
                 cb_kwargs={
                     "product_id": product_id,
                     "product_url": product_url,
                     "category_url": category_url
-                },
-                meta={**response.meta}
+                }
             )
 
         pagination_container = response.xpath('//div[contains(@class, "aft")]')
@@ -54,32 +52,101 @@ class ProductSpider(scrapy.Spider):
                 yield response.follow(
                     page,
                     callback=self.parse_category,
-                    cb_kwargs={"category_url": category_url},
-                    meta={**response.meta}
+                    cb_kwargs={"category_url": category_url}
                 )
 
-    def parse_item(self, response, product_id, product_url, category_url):
-        query = {
-            "query": q.product,
-            "variables": i.product.format(product_id=product_id)
-        }
+    def parse_product(self, response, product_id, product_url, category_url):
+        payload = p.get_product_payload(product_id)
 
         yield scrapy.Request(
             url="https://api.yarcheplus.ru/api/graphql",
             method="POST",
+            body=json.dumps(payload),
+            callback=self.parse_product_reviews,
             headers={
-                "Content-Type": "application/json",
-                "token": response.meta["token"],
-                "Origin": "https://yarcheplus.ru",
-                "Referer": "https://yarcheplus.ru"
+                "Content-Type": "application/json"
             },
-            body=json.dumps(query),
-            callback=self.save_product_data
+            cb_kwargs = {
+                "product_id": product_id,
+                "product_url": product_url,
+                "category_url": category_url
+            }
         )
 
-    # TODO дописать подключение пайплайна и json
-    def save_product_data(self):
-        pass
+    def parse_product_reviews(self, response, product_id, product_url, category_url):
+        payload = p.get_review_payload(product_id)
+
+        yield scrapy.Request(
+            url="https://api.yarcheplus.ru/api/graphql",
+            method="POST",
+            body=json.dumps(payload),
+            callback=self.save_product_data,
+            headers={
+                "Content-Type": "application/json"
+            },
+            cb_kwargs = {
+                "product_id": product_id,
+                "product_url": product_url,
+                "category_url": category_url,
+                "product_data": response.json()
+            }
+        )
+
+    def save_product_data(self, response, product_id, product_url, category_url, product_data):
+        item = ProductItem()
+        data = product_data['data']['product']
+
+        item['product_url'] = 'https://yarcheplus.ru{}'.format(product_url)
+        item['category_url'] = 'https://yarcheplus.ru{}'.format(category_url)
+        item['article'] = product_id
+        item['name'] = data.get('name')
+
+        images = data.get('images', [])
+        item['images_url'] = [f"https://api.yarcheplus.ru/thumbnail/768x768/0/0/{img['id']}.png" for img in images]
+
+        item['price_regular'] = data.get('previousPrice')
+        item['price_discount'] = data.get('price')
+
+        item['description'] = data.get('description')
+
+        characteristics = {}
+        compound = None
+        for p in data.get('propertyValues', []):
+            title = p['property']['title']
+            name = p['property']['name']
+
+            if 'strValue' in p and p['strValue']:
+                value = p['strValue']
+            elif 'item' in p and p['item']:
+                value = p['item']['label']
+            else:
+                value = None
+
+            if name == 'composition':
+                compound = value
+            else:
+                characteristics[title] = value
+
+        item['characteristics'] = characteristics
+        item['compound'] = compound
+
+        item['rating'] = data.get('rating')
+        item['reviews_count'] = data.get('numberOfRatings')
+
+        review_data = response.json()['data']['productReviews']
+        item['reviews'] = [
+            {
+                "author": r.get('author'),
+                "date": r.get('dateCreated'),
+                "rating": r.get('grade'),
+                "text": r.get('text')
+            }
+            for r in review_data.get('list', [])
+        ]
+
+        item['date_scraped'] = datetime.now().isoformat()
+
+        yield item
 
 
 def extract_id(url):

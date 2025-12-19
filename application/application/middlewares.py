@@ -4,6 +4,12 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
 from scrapy import signals
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
+from webdriver_manager.firefox import GeckoDriverManager
+import time
+
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
@@ -98,3 +104,34 @@ class ApplicationDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+class TokenMiddleware:
+    def __init__(self):
+        options = Options()
+        options.add_argument("--headless")
+
+        self.driver = webdriver.Firefox(
+            service=Service(GeckoDriverManager().install()),
+            options=options
+        )
+
+        self.driver.get("https://yarcheplus.ru/")
+        time.sleep(5)
+
+        self.cookies = {
+            c["name"]: c["value"]
+            for c in self.driver.get_cookies()
+        }
+
+        if "token" in self.cookies:
+            print("Token получен из браузера: {}".format(self.cookies["token"]))
+        else:
+            print("Token НЕ найден")
+
+    def process_request(self, request, spider):
+        request.headers["token"] = self.cookies["token"]
+        return None
+
+    def close(self):
+        self.driver.quit()

@@ -7,105 +7,94 @@
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
 
-import os
 import sqlite3
 import json
 from datetime import datetime
-from scrapy.exceptions import DropItem
-
-DB_FILENAME = "products.sqlite"
 
 
-class SQLitePipeline:
+class ProductPipelineSQLite:
+    DB_FILE = 'products.db'
+    TABLE_NAME = 'products'
 
-    def __init__(self):
-        self.conn = sqlite3.connect(DB_FILENAME)
-        self.cur = self.conn.cursor()
-        self._create_tables()
+    def open_spider(self, spider):
+        self.conn = sqlite3.connect(self.DB_FILE)
+        self.cursor = self.conn.cursor()
 
-
-    def _create_tables(self):
-        exists = os.path.exists(DB_FILENAME)
-        if exists:
-            return
-        self.cur.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                product_url TEXT PRIMARY KEY,
-                sku TEXT,
-                name TEXT,
-                category TEXT,
-                images_json TEXT,
-                description TEXT,
-                attributes_json TEXT,
-                ingredients TEXT,
-                rating REAL,
-                reviews_count INTEGER,
-                reviews_json TEXT,
-                last_seen TEXT
-            )
-        """)
-        self.cur.execute("""
-            CREATE TABLE IF NOT EXISTS prices (
+        self.cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_url TEXT,
+                category_url TEXT,
+                article TEXT,
+                name TEXT,
+                images_url TEXT,
                 price_regular REAL,
                 price_discount REAL,
-                date_scraped TEXT,
-                FOREIGN KEY(product_url) REFERENCES products(product_url)
+                description TEXT,
+                characteristics TEXT,
+                compound TEXT,
+                rating REAL,
+                reviews_count INTEGER,
+                reviews TEXT,
+                date_scraped TEXT
             )
-        """)
+        ''')
         self.conn.commit()
 
-    def process_item(self, item):
+    def close_spider(self, spider):
+        self.conn.commit()
+        self.conn.close()
 
-        if not item.get('product_url'):
-            raise DropItem("Missing product_url")
+    def process_item(self, item, spider):
+        item['date_scraped'] = datetime.now().isoformat()
 
-        images_json = json.dumps(item.get('images') or [])
-        attributes_json = json.dumps(item.get('attributes') or {})
-        reviews_json = json.dumps(item.get('reviews') or [])
-
-        now = item.get('date_scraped') or datetime.utcnow().isoformat() + "Z"
-
-        self.cur.execute("""
-            INSERT INTO products(product_url, sku, name, category, images_json, description, attributes_json, ingredients, rating, reviews_count, reviews_json, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(product_url) DO UPDATE SET
-              sku=excluded.sku,
-              name=excluded.name,
-              category=excluded.category,
-              images_json=excluded.images_json,
-              description=excluded.description,
-              attributes_json=excluded.attributes_json,
-              ingredients=excluded.ingredients,
-              rating=excluded.rating,
-              reviews_count=excluded.reviews_count,
-              reviews_json=excluded.reviews_json,
-              last_seen=excluded.last_seen
-        """, (
+        self.cursor.execute(f'''
+            INSERT INTO {self.TABLE_NAME} (
+                product_url,
+                category_url,
+                article,
+                name,
+                images_url,
+                price_regular,
+                price_discount,
+                description,
+                characteristics,
+                compound,
+                rating,
+                reviews_count,
+                reviews,
+                date_scraped
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
             item.get('product_url'),
-            item.get('sku'),
+            item.get('category_url'),
+            item.get('article'),
             item.get('name'),
-            item.get('category'),
-            images_json,
-            item.get('description'),
-            attributes_json,
-            item.get('ingredients'),
-            item.get('rating'),
-            item.get('reviews_count'),
-            reviews_json,
-            now
-        ))
 
-        self.cur.execute("""
-            INSERT INTO prices(product_url, price_regular, price_discount, date_scraped)
-            VALUES (?, ?, ?, ?)
-        """, (
-            item.get('product_url'),
+            ','.join(item.get('images_url', [])) if item.get('images_url') else None,
+
             item.get('price_regular'),
             item.get('price_discount'),
-            now
+            item.get('description'),
+
+            json.dumps(
+                item.get('characteristics', {}),
+                ensure_ascii=False
+            ),
+
+            item.get('compound'),
+
+            item.get('rating'),
+            item.get('reviews_count'),
+
+            json.dumps(
+                item.get('reviews', []),
+                ensure_ascii=False
+            ),
+
+            item.get('date_scraped')
         ))
 
         self.conn.commit()
         return item
+

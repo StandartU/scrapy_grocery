@@ -104,8 +104,12 @@ class ProductSpider(scrapy.Spider):
         images = data.get('images', [])
         item['images_url'] = [f"https://api.yarcheplus.ru/thumbnail/768x768/0/0/{img['id']}.png" for img in images]
 
-        item['price_regular'] = data.get('previousPrice')
-        item['price_discount'] = data.get('price')
+        if data.get('previousPrice') is not None:
+            item['price_regular'] = data.get('previousPrice')
+            item['price_discount'] = data.get('price')
+        else:
+            item['price_regular'] = data.get('price')
+            item['price_discount'] = None
 
         item['description'] = data.get('description')
 
@@ -131,7 +135,7 @@ class ProductSpider(scrapy.Spider):
         item['compound'] = compound
 
         item['rating'] = data.get('rating')
-        item['reviews_count'] = data.get('numberOfRatings')
+
 
         review_data = response.json()['data']['productReviews']
         item['reviews'] = [
@@ -143,6 +147,8 @@ class ProductSpider(scrapy.Spider):
             }
             for r in review_data.get('list', [])
         ]
+
+        item['reviews_count'] = len(item['reviews'])
 
         item['date_scraped'] = datetime.now().isoformat()
 

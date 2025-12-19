@@ -10,7 +10,7 @@ r = requests.post(
              "token": "b31737583a88a1efbd5ea5118131fe710941cc82-3c542b74b41407360733197a8155c2dde3966c91"},
     json={
         "query": q.product,
-        "variables": i.product.format(product_id=39480)
+        "variables": i.product.format(product_id=39452)
     }
 )
 

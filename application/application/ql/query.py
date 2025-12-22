@@ -1,6 +1,7 @@
 product = """
 query ProductFullData($id: Int!, $similarProductsInput: ProductsRequest!) {
   product(id: $id) {
+    id
     code
     name
 
@@ -51,6 +52,21 @@ query ($input: ProductReviewsRequest!) {
     }
     page {
       total
+    }
+  }
+}
+"""
+
+category = """
+query ($input: ProductsRequest!) {
+  products(input: $input) {
+    list {
+      id
+    }
+    page {
+      total
+      limit
+      page
     }
   }
 }

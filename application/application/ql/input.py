@@ -21,3 +21,25 @@ review = """
   }}
 }}
 """
+
+category = """
+{{
+  "variables": {{
+    "input": {{
+      "page": {{
+        "page": 1,
+        "limit": 48
+      }},
+      "sort": {{
+        "param": "default",
+        "direct": "asc"
+      }},
+      "filter": {{
+        "byCategoryIds": [
+          {category_id}
+        ]
+      }}
+    }}
+  }}
+}}
+"""

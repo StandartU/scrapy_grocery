@@ -18,7 +18,7 @@ WITH ranked AS (
         *,
         LAG(price_regular) OVER (
             PARTITION BY article
-            ORDER BY date_scraped DESC
+            ORDER BY date_scraped ASC
         ) AS previous_price
     FROM products
 )

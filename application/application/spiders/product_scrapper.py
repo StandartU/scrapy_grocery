@@ -1,6 +1,7 @@
 import scrapy
 import re
 import json
+import math
 from datetime import datetime
 from fake_useragent import UserAgent
 
@@ -18,44 +19,56 @@ class ProductSpider(scrapy.Spider):
     }
 
     def parse(self, response, **kwargs):
-        categories = response.css('a.aJjLH4KAr::attr(href)').getall()
+        # categories = response.css('a.aJjLH4KAr::attr(href)').getall()
+
+        categories = response.xpath("//a[contains(@class, 'aJjLH4KAr') and contains(@class, 'a2XpkLhVn') and contains(@class, 'cJjLH4KAr')]/@href").getall()
+
+        print(categories)
 
         for category_url in categories:
-            yield response.follow(
-                category_url,
-                callback=self.parse_category,
-                cb_kwargs={"category_url": category_url}
-            )
+            category_id = extract_id(category_url)
+            payload = p.get_category_payload(category_id, page=1, limit=100)
+            yield gql_request(query_payload=payload,
+                              callback=self.parse_category,
+                              cb_kwargs={"category_id": category_id,
+                                         "category_url": category_url,
+                                         "page": 1})
 
-    def parse_category(self, response, category_url):
-        product_urls = response.css('.aUuHgqUxc a::attr(href)').getall()
+    def parse_category(self, response, category_url, category_id, page):
+        data = response.json()["data"]["products"]
+        total = data["page"]["total"]
+        limit = data["page"]["limit"]
+        total_pages = math.ceil(total / limit)
+        product_ids = [item["id"] for item in data["list"]]
 
-        for product_url in product_urls:
-            product_id = extract_id(product_url)
+        self.logger.info(
+            f"Parsing page {page} of {total_pages}. URL - {category_url}"
+        )
 
-            yield response.follow(
-                product_url,
+        for product_id in product_ids:
+            self.logger.debug(f"Yielding product_id: {product_id}")
+            payload = p.get_product_payload(product_id)
+            yield gql_request(
+                payload,
                 callback=self.parse_product,
-                cb_kwargs={
-                    "product_id": product_id,
-                    "product_url": product_url,
-                    "category_url": category_url
-                }
+                cb_kwargs={"product_id": product_id,
+                           "category_url": category_url}
             )
 
-        pagination_container = response.xpath('//div[contains(@class, "aft")]')
-
-        if pagination_container:
-            pages = pagination_container.xpath('.//a/@href').getall()
-
-            for page in pages:
-                yield response.follow(
-                    page,
+        if page == 1:
+            for next_page in range(2, total_pages + 1):
+                payload = p.get_category_payload(category_id, page=next_page, limit=limit)
+                yield gql_request(
+                    payload,
                     callback=self.parse_category,
-                    cb_kwargs={"category_url": category_url}
+                    cb_kwargs={
+                        "category_id": category_id,
+                        "category_url": category_url,
+                        "page": next_page
+                    }
                 )
 
-    def parse_product(self, response, product_id, product_url, category_url):
+    def parse_product(self, response, product_id, category_url):
         payload = p.get_product_payload(product_id)
 
         yield scrapy.Request(
@@ -67,13 +80,18 @@ class ProductSpider(scrapy.Spider):
                 "Content-Type": "application/json"
             },
             cb_kwargs = {
-                "product_id": product_id,
-                "product_url": product_url,
                 "category_url": category_url
             }
         )
 
-    def parse_product_reviews(self, response, product_id, product_url, category_url):
+    def parse_product_reviews(self, response, category_url):
+        data = response.json()["data"]["product"]
+
+        product_code, product_id = data["code"], data["id"]
+
+        product_url = "{}-{}".format(product_code, product_id)
+
+
         payload = p.get_review_payload(product_id)
 
         yield scrapy.Request(
@@ -88,34 +106,33 @@ class ProductSpider(scrapy.Spider):
                 "product_id": product_id,
                 "product_url": product_url,
                 "category_url": category_url,
-                "product_data": response.json()
+                "product_data": data
             }
         )
 
     def save_product_data(self, response, product_id, product_url, category_url, product_data):
         item = ProductItem()
-        data = product_data['data']['product']
 
         item['product_url'] = 'https://yarcheplus.ru{}'.format(product_url)
         item['category_url'] = 'https://yarcheplus.ru{}'.format(category_url)
         item['article'] = product_id
-        item['name'] = data.get('name')
+        item['name'] = product_data.get('name')
 
-        images = data.get('images', [])
+        images = product_data.get('images', [])
         item['images_url'] = [f"https://api.yarcheplus.ru/thumbnail/768x768/0/0/{img['id']}.png" for img in images]
 
-        if data.get('previousPrice') is not None:
-            item['price_regular'] = data.get('previousPrice')
-            item['price_discount'] = data.get('price')
+        if product_data.get('previousPrice') is not None:
+            item['price_regular'] = product_data.get('previousPrice')
+            item['price_discount'] = product_data.get('price')
         else:
-            item['price_regular'] = data.get('price')
+            item['price_regular'] = product_data.get('price')
             item['price_discount'] = None
 
-        item['description'] = data.get('description')
+        item['description'] = product_data.get('description')
 
         characteristics = {}
         compound = None
-        for p in data.get('propertyValues', []):
+        for p in product_data.get('propertyValues', []):
             title = p['property']['title']
             name = p['property']['name']
 
@@ -134,8 +151,7 @@ class ProductSpider(scrapy.Spider):
         item['characteristics'] = characteristics
         item['compound'] = compound
 
-        item['rating'] = data.get('rating')
-
+        item['rating'] = product_data.get('rating')
 
         review_data = response.json()['data']['productReviews']
         item['reviews'] = [
@@ -158,3 +174,14 @@ class ProductSpider(scrapy.Spider):
 def extract_id(url):
     match = re.search(r'-([0-9]+)(?:\?|$)', url)
     return match.group(1) if match else None
+
+
+def gql_request(query_payload: dict, callback, cb_kwargs=None):
+    return scrapy.Request(
+        url="https://api.yarcheplus.ru/api/graphql",
+        method="POST",
+        headers={"Content-Type": "application/json"},
+        body=json.dumps(query_payload),
+        callback=callback,
+        cb_kwargs=cb_kwargs or {}
+    )

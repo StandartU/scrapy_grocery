@@ -29,3 +29,23 @@ def get_review_payload(product_id: str) -> dict:
             }
         }
     }
+
+def get_category_payload(category_id: int, page: int = 1, limit: int = 48) -> dict:
+    return {
+        "query": q.category,
+        "variables": {
+            "input": {
+                "page": {
+                    "page": int(page),
+                    "limit": int(limit)
+                },
+                "sort": {
+                    "param": "default",
+                    "direct": "asc"
+                },
+                "filter": {
+                    "byCategoryIds": [int(category_id)]
+                }
+            }
+        }
+    }

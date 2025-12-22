@@ -1,17 +1,15 @@
 import requests
 from fake_useragent import UserAgent
-from application.application.ql import input as i, query as q
+from application.application.ql import payload as p
 
 ua = UserAgent().firefox
 
 r = requests.post(
     "https://api.yarcheplus.ru/api/graphql",
     headers={"User-Agent": UserAgent().firefox,
-             "token": "b31737583a88a1efbd5ea5118131fe710941cc82-3c542b74b41407360733197a8155c2dde3966c91"},
-    json={
-        "query": q.product,
-        "variables": i.product.format(product_id=39452)
-    }
+             "token": "9d4507a662a277a1f073f0b139e5fb6ba1684719-38b62eadc243542dca1f49d83c6cf794f1aaf840"},
+    json=p.get_category_payload(732)
 )
 
 print(r.text)
+print(len(r.json()["data"]["products"]["list"]))

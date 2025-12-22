@@ -28,11 +28,19 @@ class ProductSpider(scrapy.Spider):
         for category_url in categories:
             category_id = extract_id(category_url)
             payload = p.get_category_payload(category_id, page=1, limit=100)
-            yield gql_request(query_payload=payload,
-                              callback=self.parse_category,
-                              cb_kwargs={"category_id": category_id,
-                                         "category_url": category_url,
-                                         "page": 1})
+
+            yield scrapy.Request(
+                url="https://api.yarcheplus.ru/api/graphql",
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                body=json.dumps(payload),
+                callback=self.parse_category,
+                cb_kwargs={"category_id": category_id,
+                           "category_url": category_url,
+                           "page": 1},
+                dont_filter=True
+            )
+
 
     def parse_category(self, response, category_url, category_id, page):
         data = response.json()["data"]["products"]
@@ -48,40 +56,50 @@ class ProductSpider(scrapy.Spider):
         for product_id in product_ids:
             self.logger.debug(f"Yielding product_id: {product_id}")
             payload = p.get_product_payload(product_id)
-            yield gql_request(
-                payload,
+
+            yield scrapy.Request(
+                url="https://api.yarcheplus.ru/api/graphql",
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                body=json.dumps(payload),
                 callback=self.parse_product,
                 cb_kwargs={"product_id": product_id,
-                           "category_url": category_url}
+                           "category_url": category_url},
+                dont_filter=True
             )
 
         if page == 1:
             for next_page in range(2, total_pages + 1):
                 payload = p.get_category_payload(category_id, page=next_page, limit=limit)
-                yield gql_request(
-                    payload,
+
+                yield scrapy.Request(
+                    url="https://api.yarcheplus.ru/api/graphql",
+                    method="POST",
+                    headers={"Content-Type": "application/json"},
+                    body=json.dumps(payload),
                     callback=self.parse_category,
                     cb_kwargs={
                         "category_id": category_id,
                         "category_url": category_url,
                         "page": next_page
-                    }
+                    },
+                dont_filter=True
                 )
+
 
     def parse_product(self, response, product_id, category_url):
         payload = p.get_product_payload(product_id)
 
+        self.logger.debug("parse_product: {}".format(product_id))
+
         yield scrapy.Request(
             url="https://api.yarcheplus.ru/api/graphql",
             method="POST",
+            headers={"Content-Type": "application/json"},
             body=json.dumps(payload),
             callback=self.parse_product_reviews,
-            headers={
-                "Content-Type": "application/json"
-            },
-            cb_kwargs = {
-                "category_url": category_url
-            }
+            cb_kwargs={"category_url": category_url},
+            dont_filter=True
         )
 
     def parse_product_reviews(self, response, category_url):
@@ -89,25 +107,25 @@ class ProductSpider(scrapy.Spider):
 
         product_code, product_id = data["code"], data["id"]
 
-        product_url = "{}-{}".format(product_code, product_id)
+        self.logger.debug("parse_product_reviews: {}".format(product_id))
 
+        product_url = "{}-{}".format(product_code, product_id)
 
         payload = p.get_review_payload(product_id)
 
         yield scrapy.Request(
             url="https://api.yarcheplus.ru/api/graphql",
             method="POST",
+            headers={"Content-Type": "application/json"},
             body=json.dumps(payload),
             callback=self.save_product_data,
-            headers={
-                "Content-Type": "application/json"
-            },
-            cb_kwargs = {
+            cb_kwargs={
                 "product_id": product_id,
                 "product_url": product_url,
                 "category_url": category_url,
                 "product_data": data
-            }
+            },
+            dont_filter=True
         )
 
     def save_product_data(self, response, product_id, product_url, category_url, product_data):
@@ -174,14 +192,3 @@ class ProductSpider(scrapy.Spider):
 def extract_id(url):
     match = re.search(r'-([0-9]+)(?:\?|$)', url)
     return match.group(1) if match else None
-
-
-def gql_request(query_payload: dict, callback, cb_kwargs=None):
-    return scrapy.Request(
-        url="https://api.yarcheplus.ru/api/graphql",
-        method="POST",
-        headers={"Content-Type": "application/json"},
-        body=json.dumps(query_payload),
-        callback=callback,
-        cb_kwargs=cb_kwargs or {}
-    )

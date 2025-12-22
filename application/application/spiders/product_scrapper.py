@@ -54,7 +54,6 @@ class ProductSpider(scrapy.Spider):
         )
 
         for product_id in product_ids:
-            self.logger.debug(f"Yielding product_id: {product_id}")
             payload = p.get_product_payload(product_id)
 
             yield scrapy.Request(
@@ -90,8 +89,6 @@ class ProductSpider(scrapy.Spider):
     def parse_product(self, response, product_id, category_url):
         payload = p.get_product_payload(product_id)
 
-        self.logger.debug("parse_product: {}".format(product_id))
-
         yield scrapy.Request(
             url="https://api.yarcheplus.ru/api/graphql",
             method="POST",
@@ -106,8 +103,6 @@ class ProductSpider(scrapy.Spider):
         data = response.json()["data"]["product"]
 
         product_code, product_id = data["code"], data["id"]
-
-        self.logger.debug("parse_product_reviews: {}".format(product_id))
 
         product_url = "{}-{}".format(product_code, product_id)
 
